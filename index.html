@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TuSecreto.io</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Fuentes Inter para una apariencia moderna */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5; /* Un fondo gris claro para la página */
+        }
+        /* Estilos personalizados para el contenedor de mensajes (en lugar de alert()) */
+        #messageBox {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #4CAF50; /* Verde para éxito */
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none; /* Oculto por defecto */
+            text-align: center;
+        }
+        #messageBox.error {
+            background-color: #f44336; /* Rojo para errores */
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-8 px-4 sm:px-6 lg:px-8 bg-gray-100">
+    <!-- Contenedor para mensajes de la aplicación -->
+    <div id="messageBox" class="rounded-lg shadow-lg"></div>
+
+    <div class="max-w-3xl w-full bg-white p-8 rounded-xl shadow-lg border border-gray-200">
+        <h1 class="text-4xl font-extrabold text-center text-gray-800 mb-6">
+            TuSecreto.io
+        </h1>
+        <p class="text-center text-gray-600 mb-8">
+            ¡Comparte tu secreto de forma completamente anónima!
+        </p>
+
+        <!-- Sección de Usuario Anónimo -->
+        <div class="mb-8 p-4 bg-blue-50 rounded-lg border border-blue-200 text-blue-800 text-sm">
+            <p>Tu ID de usuario anónimo de la sesión: <span id="userIdDisplay" class="font-bold break-all">Cargando...</span></p>
+            <p class="mt-1">
+                Este ID es único para ti y permite que tus secretos se asocien contigo de forma anónima en esta sesión.
+            </p>
+        </div>
+
+        <!-- Área para escribir el secreto -->
+        <div class="mb-6">
+            <label for="secretInput" class="block text-xl font-semibold text-gray-700 mb-3">
+                Escribe tu secreto aquí:
+            </label>
+            <textarea id="secretInput" rows="6"
+                      class="mt-1 block w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-lg resize-y"
+                      placeholder="Ejemplo: 'Me gusta comer pizza con piña en secreto.'"
+                      maxlength="500"></textarea>
+            <div class="text-right text-sm text-gray-500 mt-2">
+                <span id="charCount">0</span>/500 caracteres
+            </div>
+        </div>
+
+        <!-- Campos de Edad y Género -->
+        <div class="flex flex-col sm:flex-row gap-4 mb-6">
+            <div class="flex-1">
+                <label for="secretAge" class="block text-gray-700 text-sm font-semibold mb-2">
+                    Tu Edad (Mínimo 16):
+                </label>
+                <input type="number" id="secretAge"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out"
+                       placeholder="Ej: 25" min="16" required>
+            </div>
+            <div class="flex-1">
+                <label for="secretGender" class="block text-gray-700 text-sm font-semibold mb-2">
+                    Tu Género:
+                </label>
+                <select id="secretGender"
+                        class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition duration-200 ease-in-out"
+                        required>
+                    <option value="">Selecciona</option>
+                    <option value="Hombre">Hombre</option>
+                    <option value="Mujer">Mujer</option>
+                    <option value="Otro">Otro</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Botón para publicar el secreto -->
+        <button id="publishSecretButton"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 shadow-lg text-lg">
+            Publicar secreto Anónimamente
+        </button>
+
+        <hr class="my-10 border-gray-300">
+
+        <h2 class="text-3xl font-bold text-center text-gray-800 mb-6">
+            Secretos Recientes
+        </h2>
+
+        <!-- Contenedor para la lista de secretos -->
+        <div id="secretsList" class="space-y-6">
+            <!-- Los secretos se cargarán aquí dinámicamente -->
+            <p class="text-center text-gray-500" id="loadingSecretsMessage">Cargando secretos...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        // Importa los módulos necesarios de Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy, serverTimestamp, doc, deleteDoc, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Función para mostrar mensajes temporales en la interfaz
+        function showMessage(message, isError = false) {
+            const messageBox = document.getElementById('messageBox');
+            messageBox.textContent = message;
+            if (isError) {
+                messageBox.classList.add('error');
+            } else {
+                messageBox.classList.remove('error');
+            }
+            messageBox.style.display = 'block';
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 3000); // El mensaje desaparece después de 3 segundos
+        }
+
+        let db; // Variable para la instancia de Firestore
+        let auth; // Variable para la instancia de Auth
+        let userId; // Variable para almacenar el ID del usuario actual
+
+        // Obtener el ID de la aplicación y la configuración de Firebase
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+
+        // Función de inicialización de Firebase y autenticación
+        async function initializeFirebase() {
+            try {
+                // Inicializa la aplicación Firebase con la configuración proporcionada
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app); // Obtiene la instancia de Firestore
+                auth = getAuth(app); // Obtiene la instancia de Auth
+
+                // Escucha los cambios en el estado de autenticación
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        // Usuario autenticado
+                        userId = user.uid;
+                        document.getElementById('userIdDisplay').textContent = userId;
+                        console.log("Firebase initialized. User ID:", userId);
+                        // Carga los secretos después de que el usuario esté autenticado
+                        loadSecrets();
+                    } else {
+                        // No hay usuario, intenta iniciar sesión anónimamente
+                        console.log("No user signed in. Signing in anonymously...");
+                        await signInAnonymously(auth); // Inicia sesión anónimamente si no hay usuario
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase or signing in:", error);
+                showMessage("Error al iniciar la aplicación. Intenta de nuevo.", true);
+            }
+        }
+
+        // Función para cargar los secretos de Firestore
+        function loadSecrets() {
+            const secretsList = document.getElementById('secretsList');
+            const loadingSecretsMessage = document.getElementById('loadingSecretsMessage');
+            
+            // Muestra el mensaje de carga al inicio
+            loadingSecretsMessage.style.display = 'block';
+
+            // Crea una consulta para la colección 'secrets'
+            const secretsColRef = collection(db, `artifacts/${appId}/public/data/secrets`);
+            // Ordenar por marca de tiempo de forma descendente para mostrar los más recientes primero
+            const q = query(secretsColRef, orderBy('timestamp', 'desc'));
+
+            // Escucha cambios en tiempo real en la colección 'secrets'
+            onSnapshot(q, (snapshot) => {
+                secretsList.innerHTML = ''; // Limpia la lista existente antes de añadir los nuevos
+                loadingSecretsMessage.style.display = 'none'; // Oculta el mensaje de carga
+
+                if (snapshot.empty) {
+                    secretsList.innerHTML = '<p class="text-center text-gray-500">Aún no hay secretos. ¡Sé el primero en compartir uno!</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const secretData = doc.data();
+                    const secretText = secretData.text;
+                    const timestamp = secretData.timestamp ? new Date(secretData.timestamp.toDate()).toLocaleString() : 'Fecha desconocida';
+                    const ownerId = secretData.userId || 'Anónimo'; 
+                    const secretAge = secretData.age || 'N/A';
+                    const secretGender = secretData.gender || 'N/A';
+
+                    // Determinar la clase de color para la edad según el género
+                    let ageColorClass = 'text-gray-700'; // Color por defecto
+                    if (secretGender === 'Hombre') {
+                        ageColorClass = 'text-blue-500'; // Azul para hombre
+                    } else if (secretGender === 'Mujer') {
+                        ageColorClass = 'text-pink-500'; // Rosa para mujer
+                    }
+
+                    // Crea el elemento div para mostrar cada secreto
+                    const secretElement = document.createElement('div');
+                    secretElement.className = 'bg-gray-50 p-6 rounded-lg shadow-sm border border-gray-200 transition-all duration-300 ease-in-out hover:shadow-md';
+                    secretElement.innerHTML = `
+                        <p class="text-gray-800 text-lg mb-4 leading-relaxed whitespace-pre-wrap">${secretText}</p>
+                        <div class="flex justify-between items-center text-sm text-gray-500 mb-2">
+                            <span class="flex items-center">
+                                <svg class="w-4 h-4 mr-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                ${timestamp}
+                            </span>
+                            <span class="text-gray-500 font-medium">(Anónimo)</span>
+                        </div>
+                        <div class="flex justify-end items-center text-sm text-gray-600">
+                            <span class="mr-2">
+                                Edad: <span class="${ageColorClass} font-bold">${secretAge}</span>
+                            </span>
+                            <span>
+                                Género: <span class="font-bold">${secretGender}</span>
+                            </span>
+                        </div>
+                    `;
+                    secretsList.appendChild(secretElement);
+                });
+            }, (error) => {
+                console.error("Error al cargar los secretos:", error);
+                showMessage("Error al cargar secretos. Intenta de nuevo.", true);
+                loadingSecretsMessage.style.display = 'none'; // Oculta el mensaje de carga
+                secretsList.innerHTML = '<p class="text-center text-red-500">Error al cargar los secretos. Por favor, inténtalo de nuevo.</p>';
+            });
+        }
+
+        // Manejador de eventos para el botón de publicación de secreto
+        document.getElementById('publishSecretButton').addEventListener('click', async () => {
+            const secretInput = document.getElementById('secretInput');
+            const secretText = secretInput.value.trim();
+            const secretAge = parseInt(document.getElementById('secretAge').value);
+            const secretGender = document.getElementById('secretGender').value;
+            const publishButton = document.getElementById('publishSecretButton');
+
+            if (!secretText) {
+                showMessage("Por favor, escribe un secreto antes de publicar.", true);
+                return;
+            }
+            if (secretText.length > 500) {
+                showMessage("El secreto no puede exceder los 500 caracteres.", true);
+                return;
+            }
+            if (isNaN(secretAge) || secretAge < 16) {
+                showMessage("Por favor, introduce una edad válida (mínimo 16 años).", true);
+                return;
+            }
+            if (!secretGender) {
+                showMessage("Por favor, selecciona tu género.", true);
+                return;
+            }
+            if (!userId) {
+                showMessage("El ID de usuario no está disponible. Por favor, espera a que la aplicación se inicialice.", true);
+                return;
+            }
+
+            publishButton.disabled = true; // Deshabilita el botón
+            publishButton.textContent = 'Publicando...'; // Cambia el texto del botón
+
+            try {
+                // Añade el documento a la colección 'secrets'
+                await addDoc(collection(db, `artifacts/${appId}/public/data/secrets`), {
+                    text: secretText,
+                    userId: userId, // Siempre se guarda con el ID de sesión anónimo
+                    age: secretAge,
+                    gender: secretGender,
+                    timestamp: serverTimestamp() // Marca de tiempo del servidor
+                });
+
+                showMessage("¡Secreto publicado con éxito!");
+                secretInput.value = ''; // Limpia el área de texto
+                document.getElementById('secretAge').value = ''; // Limpia el campo de edad
+                document.getElementById('secretGender').value = ''; // Limpia el campo de género
+                document.getElementById('charCount').textContent = '0'; // Reinicia el contador de caracteres
+            } catch (e) {
+                console.error("Error al añadir el documento: ", e);
+                showMessage("Error al publicar el secreto. Intenta de nuevo.", true);
+            } finally {
+                publishButton.disabled = false; // Habilita el botón de nuevo
+                publishButton.textContent = 'Publicar secreto Anónimamente'; // Restaura el texto del botón
+            }
+        });
+
+        // Contador de caracteres para el textarea
+        document.getElementById('secretInput').addEventListener('input', () => {
+            const currentLength = document.getElementById('secretInput').value.length;
+            document.getElementById('charCount').textContent = currentLength;
+            if (currentLength > 500) {
+                document.getElementById('charCount').classList.add('text-red-500');
+            } else {
+                document.getElementById('charCount').classList.remove('text-red-500');
+            }
+        });
+
+        // Inicializa Firebase cuando la ventana se haya cargado completamente
+        window.onload = initializeFirebase;
+    </script>
+</body>
+</html>
